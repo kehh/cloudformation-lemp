@@ -2,6 +2,14 @@
   "AWSTemplateFormatVersion": "2010-09-09",
   "Description": "Creates a PHP web/app server instance with an ELB, an autoscaling group, and an RDS MySQL instance",
   "Parameters": {
+    "ReleaseBucketName": {
+      "Description": "Name of the S3 bucket containing releases",
+      "Type": "String"
+    },
+    "ReleaseId": {
+      "Description": "The release identifier of the application running on this stack",
+      "Type": "String"
+    },
     "DatabaseName": {
       "Description": "Name of the database to be created in the RDS instance",
       "Type": "String"
@@ -211,7 +219,15 @@
               "",
               [
                 "#!/bin/bash\n",
-                "/usr/bin/aws s3 cp s3://coderhythm-lghc-release/c01aade/bootstrap - | /bin/bash -s ",
+                "/usr/bin/aws s3 cp s3://",
+                {
+                  "Ref": "ReleaseBucketName"
+                },
+                "/",
+                {
+                  "Ref": "ReleaseId"
+                },
+                "/bootstrap - | /bin/bash -s ",
                 {
                   "Ref": "DatabaseName"
                 },
@@ -266,8 +282,29 @@
                   "Effect": "Allow",
                   "Action": "s3:*",
                   "Resource": [
-                    "arn:aws:s3:::coderhythm-lghc-release",
-                    "arn:aws:s3:::coderhythm-lghc-release/*"
+                    {
+                      "Fn::Join": [
+                        "",
+                        [
+                          "arn:aws:s3:::",
+                          {
+                            "Ref": "ReleaseBucketName"
+                          }
+                        ]
+                      ]
+                    },
+                    {
+                      "Fn::Join": [
+                        "",
+                        [
+                          "arn:aws:s3:::",
+                          {
+                            "Ref": "ReleaseBucketName"
+                          },
+                          "/*"
+                        ]
+                      ]
+                    }
                   ]
                 }
               ]

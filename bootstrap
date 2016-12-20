@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# TODO: Handle software updates and installation ahead of time and deliver as AMI
+yum update -y
+yum install -y nginx php70-fpm php70-mysqlnd
+curl https://wordpress.org/latest.tar.gz | tar -xzf - -C /srv
+ln -sf /srv/wordpress /srv/www
+
+# TODO: Port WordPress-specific NGINX rules
+cat << EOF > /etc/nginx/nginx.conf
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                      '\$status \$body_bytes_sent "\$http_referer" '
+                      '"\$http_user_agent" "\$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile            on;
+    tcp_nopush          on;
+    tcp_nodelay         on;
+    keepalive_timeout   65;
+    types_hash_max_size 2048;
+
+    include             /etc/nginx/mime.types;
+    default_type        application/octet-stream;
+
+    server {
+        listen       80 default_server;
+        listen       [::]:80 default_server;
+        server_name  _;
+        root         /srv/www;
+        index        index.php;
+
+        location ~ \.php$ {
+            include /etc/nginx/fastcgi.conf;
+            fastcgi_pass  127.0.0.1:9000;
+            fastcgi_index index.php;
+        }
+    }
+}
+EOF
+
+cat << EOF > /etc/php-fpm.d/www.conf
+[www]
+user = nginx
+group = nginx
+listen = 127.0.0.1:9000
+listen.allowed_clients = 127.0.0.1
+pm = dynamic
+pm.max_children = 50
+pm.start_servers = 5
+pm.min_spare_servers = 5
+pm.max_spare_servers = 35
+php_admin_value[error_log] = /var/log/php-fpm/7.0/www-error.log
+php_admin_flag[log_errors] = on
+php_value[session.save_handler] = files
+php_value[session.save_path]    = /var/lib/php/7.0/session
+php_value[soap.wsdl_cache_dir]  = /var/lib/php/7.0/wsdlcache
+EOF
+
+# TODO: Add error handling to the argument handling here
+db_name=$1
+db_user=$2
+db_password=$3
+db_host=$4
+
+cat << EOF > /srv/www/wp-config.php
+<?php
+define('DB_NAME', '$db_name');
+define('DB_USER', '$db_user');
+define('DB_PASSWORD', '$db_password');
+define('DB_HOST', '$db_host');
+define('DB_CHARSET', 'utf8');
+define('DB_COLLATE', '');
+
+define('AUTH_KEY',         'tee3aisei9ohNgai8ahweeliizaech2eesh2thi5osh3kohS');
+define('SECURE_AUTH_KEY',  'Tahp7ciingiech5wieShohloh8pai4zeughaethahthieNg6');
+define('LOGGED_IN_KEY',    'ohki8HeiY7eiKi9cohmiuka5Tao9Exah7aJ5sooCue7yai0w');
+define('NONCE_KEY',        'oish0ap0shohsaph9ayair1ohwumai4Aibah3aRai5waijae');
+define('AUTH_SALT',        'moh8iecheePohn6see9vee6ahsiphaip3chea5Owuhohjoov');
+define('SECURE_AUTH_SALT', 'kahF7xee5meiz1Eigaeph6Eed3eipheaNg2Eezohx3oogae1');
+define('LOGGED_IN_SALT',   'chanai3ahhohphu3theef5eivaingeelahdainujohXahtha');
+define('NONCE_SALT',       'tei8Aiy5zohsh4ohmai5Ij6aipo6yu5Zeew8Washoh6aipho');
+
+\$table_prefix  = 'wp_';
+define('WP_DEBUG', false);
+if ( !defined('ABSPATH') )
+	define('ABSPATH', dirname(__FILE__) . '/');
+require_once(ABSPATH . 'wp-settings.php');
+EOF
+
+chown -R nginx:nginx /srv/www
+chown -R nginx:nginx /var/log/php-fpm
+chown -R nginx:nginx /var/lib/php
+
+chkconfig nginx on
+chkconfig php-fpm on
+
+service php-fpm start
+service nginx start
+
+# TODO: Configure log aggregation to CloudWatch or Loggly

@@ -1,0 +1,379 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Creates a PHP web/app server instance with an ELB, an autoscaling group, and an RDS MySQL instance",
+  "Parameters": {
+    "DatabaseName": {
+      "Description": "Name of the database to be created in the RDS instance",
+      "Type": "String"
+    },
+    "DatabaseUsername": {
+      "Description": "Name of the user to be created in the RDS instance",
+      "Type": "String"
+    },
+    "Databasepassword": {
+      "Description": "Password to be used to authenticate the user created in the RDS instance",
+      "Type": "String",
+      "NoEcho": "True"
+    },
+    "KeyName": {
+      "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription": "must be the name of an existing EC2 KeyPair."
+    },
+    "PublicSubnetAId": {
+      "Description": "The identifier of a public subnet in which to place the load balancer instance",
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "PublicSubnetBId": {
+      "Description": "The identifier of a public subnet in which to place the load balancer instance",
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "PrivateSubnetAId": {
+      "Description": "The identifier of a private subnet in which to place the web server instance",
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "PrivateSubnetBId": {
+      "Description": "The identifier of a private subnet in which to place the web server instance",
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "BastionSecurityGroupId": {
+      "Description": "The identifier of the security group that will be be granted administrative access",
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    },
+    "VpcId": {
+      "Description": "The identifier of the VPC in which to place the bastion instance",
+      "Type": "AWS::EC2::VPC::Id"
+    }
+  },
+  "Mappings": {
+    "InstanceConfig": {
+      "WebServer": {
+        "InstanceType": "t2.micro",
+        "ImageId": "ami-5ec1673e"
+      },
+      "Database": {
+        "MultiAZ": "false",
+        "Name": "wordpress",
+        "Username": "wordpress",
+        "Password": "OoNohng6iec0ia9d",
+        "InstanceClass": "db.t2.micro",
+        "AllocatedStorage": "5"
+      }
+    }
+  },
+  "Resources": {
+    "ElasticLoadBalancer": {
+      "Type": "AWS::ElasticLoadBalancing::LoadBalancer",
+      "Properties": {
+        "Subnets": [
+          {
+            "Ref": "PublicSubnetAId"
+          },
+          {
+            "Ref": "PublicSubnetBId"
+          }
+        ],
+        "CrossZone": "true",
+        "LBCookieStickinessPolicy": [
+          {
+            "PolicyName": "CookieBasedPolicy",
+            "CookieExpirationPeriod": "30"
+          }
+        ],
+        "Listeners": [
+          {
+            "LoadBalancerPort": "80",
+            "InstancePort": "80",
+            "Protocol": "HTTP",
+            "PolicyNames": [
+              "CookieBasedPolicy"
+            ]
+          }
+        ],
+        "HealthCheck": {
+          "Target": "HTTP:80/",
+          "HealthyThreshold": "2",
+          "UnhealthyThreshold": "5",
+          "Interval": "10",
+          "Timeout": "5"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "LoadBalancerSecurityGroup"
+          }
+        ]
+      }
+    },
+    "LoadBalancerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Load balancers",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "80",
+            "ToPort": "80",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VpcId"
+        }
+      }
+    },
+    "WebServerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Web servers",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "80",
+            "ToPort": "80",
+            "SourceSecurityGroupId": {
+              "Ref": "LoadBalancerSecurityGroup"
+            }
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "80",
+            "ToPort": "80",
+            "SourceSecurityGroupId": {
+              "Ref": "BastionSecurityGroupId"
+            }
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "22",
+            "ToPort": "22",
+            "SourceSecurityGroupId": {
+              "Ref": "BastionSecurityGroupId"
+            }
+          }
+        ],
+        "VpcId": {
+          "Ref": "VpcId"
+        }
+      }
+    },
+    "WebServerGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "VPCZoneIdentifier": [
+          {
+            "Ref": "PrivateSubnetAId"
+          },
+          {
+            "Ref": "PrivateSubnetBId"
+          }
+        ],
+        "LaunchConfigurationName": {
+          "Ref": "LaunchConfig"
+        },
+        "MinSize": "1",
+        "MaxSize": "5",
+        "DesiredCapacity": "1",
+        "LoadBalancerNames": [
+          {
+            "Ref": "ElasticLoadBalancer"
+          }
+        ]
+      }
+    },
+    "LaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Properties": {
+        "ImageId": {
+          "Fn::FindInMap": [
+            "InstanceConfig",
+            "WebServer",
+            "ImageId"
+          ]
+        },
+        "InstanceType": {
+          "Fn::FindInMap": [
+            "InstanceConfig",
+            "WebServer",
+            "InstanceType"
+          ]
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "WebServerSecurityGroup"
+          }
+        ],
+        "KeyName": {
+          "Ref": "KeyName"
+        },
+        "IamInstanceProfile": {
+          "Ref": "WebServerInstanceProfile"
+        },
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash\n",
+                "/usr/bin/aws s3 cp s3://coderhythm-lghc-release/c01aade/bootstrap - | /bin/bash -s ",
+                {
+                  "Ref": "DatabaseName"
+                },
+                " ",
+                {
+                  "Ref": "DatabaseUsername"
+                },
+                " ",
+                {
+                  "Ref": "DatabasePassword"
+                },
+                " ",
+                {
+                  "Fn::GetAtt": [
+                    "DatabaseInstance",
+                    "Endpoint.Address"
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "WebServerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "S3Access",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "s3:*",
+                  "Resource": [
+                    "arn:aws:s3:::coderhythm-lghc-release",
+                    "arn:aws:s3:::coderhythm-lghc-release/*"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "WebServerInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [
+          {
+            "Ref": "WebServerRole"
+          }
+        ]
+      }
+    },
+    "DatabaseSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Database servers",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "3306",
+            "ToPort": "3306",
+            "SourceSecurityGroupId": {
+              "Ref": "WebServerSecurityGroup"
+            }
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "3306",
+            "ToPort": "3306",
+            "SourceSecurityGroupId": {
+              "Ref": "BastionSecurityGroupId"
+            }
+          }
+        ],
+        "VpcId": {
+          "Ref": "VpcId"
+        }
+      }
+    },
+    "DatabaseSubnetGroup": {
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "Properties": {
+        "DBSubnetGroupDescription": "This is required",
+        "SubnetIds": [
+          {
+            "Ref": "PrivateSubnetAId"
+          },
+          {
+            "Ref": "PrivateSubnetBId"
+          }
+        ]
+      }
+    },
+    "DatabaseInstance": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "DBSubnetGroupName": {
+          "Ref": "DatabaseSubnetGroup"
+        },
+        "DBName": {
+          "Ref": "DatabaseName"
+        },
+        "Engine": "MySQL",
+        "MultiAZ": {
+          "Fn::FindInMap": [
+            "InstanceConfig",
+            "Database",
+            "MultiAZ"
+          ]
+        },
+        "MasterUsername": {
+          "Ref": "DatabaseUsername"
+        },
+        "MasterUserPassword": {
+          "Ref": "DatabasePassword"
+        },
+        "DBInstanceClass": {
+          "Fn::FindInMap": [
+            "InstanceConfig",
+            "Database",
+            "InstanceClass"
+          ]
+        },
+        "AllocatedStorage": {
+          "Fn::FindInMap": [
+            "InstanceConfig",
+            "Database",
+            "AllocatedStorage"
+          ]
+        },
+        "VPCSecurityGroups": [
+          {
+            "Ref": "DatabaseSecurityGroup"
+          }
+        ]
+      }
+    }
+  }
+}

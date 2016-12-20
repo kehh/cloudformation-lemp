@@ -10,7 +10,7 @@
       "Description": "Name of the user to be created in the RDS instance",
       "Type": "String"
     },
-    "Databasepassword": {
+    "DatabasePassword": {
       "Description": "Password to be used to authenticate the user created in the RDS instance",
       "Type": "String",
       "NoEcho": "True"
@@ -53,9 +53,6 @@
       },
       "Database": {
         "MultiAZ": "false",
-        "Name": "wordpress",
-        "Username": "wordpress",
-        "Password": "OoNohng6iec0ia9d",
         "InstanceClass": "db.t2.micro",
         "AllocatedStorage": "5"
       }
